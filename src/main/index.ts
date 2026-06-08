@@ -19,6 +19,7 @@ import {
   mergeWriteSettings,
   normalizeAppSettings,
   normalizeAppBehaviorSettings,
+  normalizeKeyboardShortcuts,
   resolveKunRuntimeSettings,
   type AppBehaviorConfigV1,
   type AppSettingsPatch,
@@ -874,6 +875,12 @@ app.whenReady().then(async () => {
       appBehavior: normalizeAppBehaviorSettings({
         ...prev.appBehavior,
         ...(partial.appBehavior ?? {})
+      }),
+      keyboardShortcuts: normalizeKeyboardShortcuts({
+        bindings: {
+          ...prev.keyboardShortcuts.bindings,
+          ...(partial.keyboardShortcuts?.bindings ?? {})
+        }
       }),
       write: mergeWriteSettings(prev.write, partial.write),
       claw: mergeClawSettings(prev.claw, partial.claw),

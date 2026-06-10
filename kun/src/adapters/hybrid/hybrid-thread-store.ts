@@ -1,6 +1,6 @@
-import { mkdir, open, readFile, readdir, rm, stat } from 'node:fs/promises'
+import { mkdir, open, readFile, readdir, rename, rm, stat } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
-import type { Database as BetterSqliteDatabase } from 'better-sqlite3'
+import type { Database as BetterSqliteDatabase, Statement } from 'better-sqlite3'
 import type {
   ThreadGoal,
   ThreadMode,
@@ -72,6 +72,8 @@ type ThreadIndexRecord = {
   preview: string
 }
 
+type UsageRuntimeEvent = Extract<RuntimeEvent, { kind: 'usage' }>
+
 type UsageRow = {
   thread_id: string
   seq: number
@@ -94,6 +96,18 @@ export class HybridThreadStore implements ThreadStore {
   private readonly metadataQueues = new Map<string, Promise<void>>()
   private backfillPromise: Promise<void> | null = null
   private db: BetterSqliteDatabase | null = null
+  // Prepared-statement cache for the per-event hot paths; better-sqlite3
+  // re-compiles the SQL on every prepare() call otherwise.
+  private readonly statementCache = new Map<string, Statement>()
+  // Reconstructed thread records keyed by the file signatures they were built
+  // from. Thread detail requests re-read multi-megabyte JSONL files otherwise.
+  private readonly threadRecordCache = new Map<
+    string,
+    { metadataSig: string; itemsSig: string; record: ThreadRecord }
+  >()
+  // Per-thread floor that keeps metadata compaction from re-running on every
+  // append when a single snapshot is already larger than the threshold.
+  private readonly metadataCompactFloor = new Map<string, number>()
 
   constructor(options: { dataDir: string; sqlitePath?: string; nowIso?: () => string }) {
     this.dataDir = resolve(options.dataDir, 'threads')
@@ -175,6 +189,8 @@ export class HybridThreadStore implements ThreadStore {
     }
     await rm(dir, { recursive: true, force: true })
     this.deleteIndexRow(threadId)
+    this.threadRecordCache.delete(threadId)
+    this.metadataCompactFloor.delete(threadId)
     return true
   }
 
@@ -188,21 +204,19 @@ export class HybridThreadStore implements ThreadStore {
     this.noteEventHighWaterSync(event.threadId, event.seq)
     if (event.kind !== 'usage') return
     try {
-      this.db
-        .prepare(`
-          INSERT INTO usage_events (
-            thread_id, seq, timestamp, turn_id, model, usage_json
-          )
-          VALUES (
-            @thread_id, @seq, @timestamp, @turn_id, @model, @usage_json
-          )
-          ON CONFLICT(thread_id, seq) DO UPDATE SET
-            timestamp = excluded.timestamp,
-            turn_id = excluded.turn_id,
-            model = excluded.model,
-            usage_json = excluded.usage_json
-        `)
-        .run(usageRowFromEvent(event))
+      this.cachedStatement(`
+        INSERT INTO usage_events (
+          thread_id, seq, timestamp, turn_id, model, usage_json
+        )
+        VALUES (
+          @thread_id, @seq, @timestamp, @turn_id, @model, @usage_json
+        )
+        ON CONFLICT(thread_id, seq) DO UPDATE SET
+          timestamp = excluded.timestamp,
+          turn_id = excluded.turn_id,
+          model = excluded.model,
+          usage_json = excluded.usage_json
+      `).run(usageRowFromEvent(event))
     } catch (error) {
       warnSqlite('record usage event', error)
     }
@@ -369,6 +383,17 @@ export class HybridThreadStore implements ThreadStore {
         ON usage_events(timestamp);
     `)
     addColumnIfMissing(this.db, 'threads', 'todos_json TEXT')
+    addColumnIfMissing(this.db, 'threads', 'usage_backfilled INTEGER NOT NULL DEFAULT 0')
+  }
+
+  private cachedStatement(sql: string): Statement {
+    if (!this.db) throw new Error('sqlite unavailable')
+    let statement = this.statementCache.get(sql)
+    if (!statement) {
+      statement = this.db.prepare(sql)
+      this.statementCache.set(sql, statement)
+    }
+    return statement
   }
 
   private startBackfill(): void {
@@ -380,21 +405,31 @@ export class HybridThreadStore implements ThreadStore {
 
   private async backfill(): Promise<void> {
     if (!this.db) return
-    const rows = this.db.prepare('SELECT id FROM threads').all() as Array<{ id: string }>
-    const indexed = new Set(rows.map((row) => row.id))
+    const rows = this.db
+      .prepare('SELECT id, usage_backfilled FROM threads')
+      .all() as Array<{ id: string; usage_backfilled?: number }>
+    const indexed = new Map(rows.map((row) => [row.id, row.usage_backfilled === 1]))
     for (const threadId of await this.threadIdsFromFilesystem()) {
-      if (indexed.has(threadId)) {
-        await this.backfillUsageEventsIfMissing(threadId)
-        await yieldToEventLoop()
-        continue
+      const usageBackfilled = indexed.get(threadId)
+      // Threads marked as backfilled never need their events.jsonl re-read;
+      // without the marker every startup re-scanned the full event history
+      // of threads that simply have no usage events.
+      if (usageBackfilled === true) continue
+      if (usageBackfilled === undefined) {
+        const thread = await this.readThreadFromDisk(threadId)
+        if (!thread) continue
+        const scan = await this.scanEventsForBackfill(threadId)
+        this.upsertIndexBestEffort({
+          ...this.indexRecordForThread(thread),
+          eventSeqHighWater: scan.highWater
+        })
+        await this.insertUsageEventsChunked(threadId, scan.usage)
+      } else {
+        const scan = await this.scanEventsForBackfill(threadId)
+        this.noteEventHighWaterSync(threadId, scan.highWater)
+        await this.insertUsageEventsChunked(threadId, scan.usage)
       }
-      const thread = await this.readThreadFromDisk(threadId)
-      if (!thread) continue
-      this.upsertIndexBestEffort({
-        ...this.indexRecordForThread(thread),
-        eventSeqHighWater: await this.highestSeqFromEvents(thread.id)
-      })
-      await this.backfillUsageEventsIfMissing(thread.id)
+      this.markUsageBackfilled(threadId)
       await yieldToEventLoop()
     }
 
@@ -409,30 +444,61 @@ export class HybridThreadStore implements ThreadStore {
     }
   }
 
-  private async backfillUsageEventsIfMissing(threadId: string): Promise<void> {
-    if (!this.db) return
+  /** Single pass over events.jsonl: high-water mark plus usage events. */
+  private async scanEventsForBackfill(
+    threadId: string
+  ): Promise<{ highWater: number; usage: UsageRuntimeEvent[] }> {
+    let highWater = 0
+    const usage: UsageRuntimeEvent[] = []
     try {
-      const existing = this.db
-        .prepare('SELECT 1 FROM usage_events WHERE thread_id = ? LIMIT 1')
-        .get(threadId)
-      if (existing) return
-      const events = await readJsonl<RuntimeEvent>(this.eventsPath(threadId))
-      for (const event of events) {
-        this.noteEventHighWaterSync(threadId, event.seq)
-        if (event.kind !== 'usage') continue
-        this.db
-          .prepare(`
-            INSERT OR REPLACE INTO usage_events (
-              thread_id, seq, timestamp, turn_id, model, usage_json
-            )
-            VALUES (
-              @thread_id, @seq, @timestamp, @turn_id, @model, @usage_json
-            )
-          `)
-          .run(usageRowFromEvent(event))
+      for (const event of await readJsonl<RuntimeEvent>(this.eventsPath(threadId))) {
+        if (event.seq > highWater) highWater = event.seq
+        if (event.kind === 'usage') usage.push(event)
       }
     } catch (error) {
-      warnSqlite(`backfill usage events for ${threadId}`, error)
+      warnSqlite(`scan events for ${threadId}`, error)
+    }
+    return { highWater, usage }
+  }
+
+  /**
+   * Inserts usage rows in small transactions, yielding between chunks.
+   * better-sqlite3 is synchronous: unchunked backfill of a large history
+   * starved the event loop long enough that the HTTP server never reported
+   * ready within the GUI's startup timeout.
+   */
+  private async insertUsageEventsChunked(threadId: string, events: UsageRuntimeEvent[]): Promise<void> {
+    if (!this.db || events.length === 0) return
+    const insert = this.cachedStatement(`
+      INSERT OR REPLACE INTO usage_events (
+        thread_id, seq, timestamp, turn_id, model, usage_json
+      )
+      VALUES (
+        @thread_id, @seq, @timestamp, @turn_id, @model, @usage_json
+      )
+    `)
+    const insertChunk = this.db.transaction((chunk: UsageRow[]) => {
+      for (const row of chunk) insert.run(row)
+    })
+    const chunkSize = 200
+    for (let start = 0; start < events.length; start += chunkSize) {
+      const chunk = events.slice(start, start + chunkSize).map(usageRowFromEvent)
+      try {
+        insertChunk(chunk)
+      } catch (error) {
+        warnSqlite(`backfill usage events for ${threadId}`, error)
+        return
+      }
+      await yieldToEventLoop()
+    }
+  }
+
+  private markUsageBackfilled(threadId: string): void {
+    if (!this.db) return
+    try {
+      this.db.prepare('UPDATE threads SET usage_backfilled = 1 WHERE id = ?').run(threadId)
+    } catch (error) {
+      warnSqlite('mark usage backfilled', error)
     }
   }
 
@@ -565,6 +631,7 @@ export class HybridThreadStore implements ThreadStore {
         thread: stripThreadItemBodies(thread)
       }
       await appendJsonlLine(this.metadataPath(thread.id), line)
+      await this.maybeCompactMetadata(thread.id)
     })
     const guard = run.then(() => undefined, () => undefined)
     this.metadataQueues.set(thread.id, guard)
@@ -574,6 +641,52 @@ export class HybridThreadStore implements ThreadStore {
       if (this.metadataQueues.get(thread.id) === guard) {
         this.metadataQueues.delete(thread.id)
       }
+    }
+  }
+
+  /**
+   * Every upsert appends a full thread snapshot, so metadata.jsonl grows
+   * quadratically with turn activity (observed: 4.2MB for an 8-turn thread
+   * whose latest snapshot is 6KB). Once the file passes the threshold it is
+   * rewritten as a single normalized snapshot. Runs inside the per-thread
+   * metadata queue, so no append can interleave with the rewrite.
+   */
+  private async maybeCompactMetadata(threadId: string): Promise<void> {
+    const path = this.metadataPath(threadId)
+    const tmpPath = `${path}.compact.tmp`
+    try {
+      const stats = await stat(path)
+      const floor = this.metadataCompactFloor.get(threadId) ?? METADATA_COMPACT_MIN_BYTES
+      if (stats.size < floor) return
+      const record = await this.readLatestMetadata(threadId)
+      if (!record) return
+      const line: ThreadMetadataLine = {
+        kind: 'thread_metadata',
+        version: 1,
+        timestamp: this.nowIso(),
+        thread: stripThreadItemBodies(record)
+      }
+      const handle = await open(tmpPath, 'w')
+      try {
+        await handle.writeFile(`${JSON.stringify(line)}\n`, 'utf-8')
+        await handle.sync()
+      } finally {
+        await handle.close()
+      }
+      await rename(tmpPath, path)
+      const compacted = await stat(path)
+      this.metadataCompactFloor.set(
+        threadId,
+        Math.max(METADATA_COMPACT_MIN_BYTES, compacted.size * 4)
+      )
+    } catch (error) {
+      // On Windows the atomic rename can fail with EPERM while another
+      // handle has the file open; the next append over the threshold simply
+      // retries. Drop the temp file so failures do not accumulate litter.
+      await rm(tmpPath, { force: true }).catch(() => undefined)
+      console.warn(
+        `[kun] metadata compaction skipped for ${threadId}: ${error instanceof Error ? error.message : String(error)}`
+      )
     }
   }
 
@@ -588,14 +701,34 @@ export class HybridThreadStore implements ThreadStore {
   }
 
   private async readThreadFromDisk(threadId: string): Promise<ThreadRecord | null> {
+    const [metadataSig, itemsSig] = await Promise.all([
+      fileSignature(this.metadataPath(threadId)),
+      fileSignature(this.messagesPath(threadId))
+    ])
+    const cached = this.threadRecordCache.get(threadId)
+    if (cached && cached.metadataSig === metadataSig && cached.itemsSig === itemsSig) {
+      // Refresh LRU position.
+      this.threadRecordCache.delete(threadId)
+      this.threadRecordCache.set(threadId, cached)
+      return cached.record
+    }
     const metadata = await this.readLatestMetadata(threadId)
     const legacy = metadata ? null : await this.readLegacyThread(threadId)
     const source = metadata ?? legacy
     if (!source) return null
     const items = await this.loadItems(threadId)
-    return hydrateThreadItems(source, items, {
+    // Records are treated as immutable by all callers (updates flow through
+    // upsert with fresh objects), so caching the reference is safe.
+    const record = hydrateThreadItems(source, items, {
       preserveExistingItemsWhenNoFileItems: Boolean(legacy)
     })
+    this.threadRecordCache.set(threadId, { metadataSig, itemsSig, record })
+    while (this.threadRecordCache.size > THREAD_RECORD_CACHE_LIMIT) {
+      const oldest = this.threadRecordCache.keys().next().value
+      if (!oldest) break
+      this.threadRecordCache.delete(oldest)
+    }
+    return record
   }
 
   private async readLatestMetadata(threadId: string): Promise<ThreadRecord | null> {
@@ -638,11 +771,6 @@ export class HybridThreadStore implements ThreadStore {
     return ordered
   }
 
-  private async highestSeqFromEvents(threadId: string): Promise<number> {
-    const events = await readJsonl<RuntimeEvent>(this.eventsPath(threadId))
-    return events.reduce((max, event) => Math.max(max, event.seq), 0)
-  }
-
   private async noteEventHighWater(threadId: string, seq: number): Promise<void> {
     await this.ready()
     this.noteEventHighWaterSync(threadId, seq)
@@ -651,16 +779,14 @@ export class HybridThreadStore implements ThreadStore {
   private noteEventHighWaterSync(threadId: string, seq: number): void {
     if (!this.db) return
     try {
-      this.db
-        .prepare(`
-          UPDATE threads
-          SET event_seq_high_water = CASE
-            WHEN event_seq_high_water > @seq THEN event_seq_high_water
-            ELSE @seq
-          END
-          WHERE id = @id
-        `)
-        .run({ id: threadId, seq })
+      this.cachedStatement(`
+        UPDATE threads
+        SET event_seq_high_water = CASE
+          WHEN event_seq_high_water > @seq THEN event_seq_high_water
+          ELSE @seq
+        END
+        WHERE id = @id
+      `).run({ id: threadId, seq })
     } catch (error) {
       warnSqlite('note event seq', error)
     }
@@ -1177,6 +1303,18 @@ function addColumnIfMissing(db: BetterSqliteDatabase, table: string, columnSql: 
     db.exec(`ALTER TABLE ${table} ADD COLUMN ${columnSql}`)
   } catch (error) {
     warnSqlite(`add column ${column}`, error)
+  }
+}
+
+const THREAD_RECORD_CACHE_LIMIT = 8
+const METADATA_COMPACT_MIN_BYTES = 1_000_000
+
+async function fileSignature(path: string): Promise<string> {
+  try {
+    const stats = await stat(path)
+    return `${stats.size}:${stats.mtimeMs}`
+  } catch {
+    return 'missing'
   }
 }
 

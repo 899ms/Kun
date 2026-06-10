@@ -809,12 +809,12 @@
   "sandboxFullAccessShort": "Full access",
   "sandboxExternalShort": "External",
   "runtimeChecking": "Checking runtime…",
-	  "runtimeStreamRecovering": "Recovering runtime event stream…",
-	  "toolUploadWaitStatus": "Waiting for model after {{count}} tool result(s)…",
-	  "toolCatalogChangedStatus": "Tool catalog changed; Kun refreshed the active tool list.",
-	  "toolStormSuppressedStatus": "{{tool}} repeated the same call too many times; Kun suppressed the duplicate and asked the model to change approach.",
-	  "compactionSummaryFallbackStatus": "Model compaction summary was unavailable; Kun used the heuristic summary.",
-	  "runtimeReady": "Runtime connected",
+  "runtimeStreamRecovering": "Recovering runtime event stream…",
+  "toolUploadWaitStatus": "Waiting for model after {{count}} tool result(s)…",
+  "toolCatalogChangedStatus": "Tool catalog changed; Kun refreshed the active tool list.",
+  "toolStormSuppressedStatus": "{{tool}} repeated the same call too many times; Kun suppressed the duplicate and asked the model to change approach.",
+  "compactionSummaryFallbackStatus": "Model compaction summary was unavailable; Kun used the heuristic summary.",
+  "runtimeReady": "Runtime connected",
   "runtimeReadyShort": "Connected",
   "runtimeCheckingShort": "Connecting",
   "runtimeOfflineShort": "Runtime offline",
@@ -1256,5 +1256,7 @@
   "toolBuiltinBash": "Bash",
   "sidebarFooterHint": "Connect the local runtime to create threads and chat with the agent.",
   "appErrorTitle": "Something went wrong",
-  "appErrorReload": "Reload"
+  "appErrorReload": "Reload",
+  "writeRichFallbackNotice": "This document contains syntax the rich editor cannot preserve losslessly. Switched to source editing to protect the file.",
+  "writeModeRich": "Rich text"
 }

@@ -33,7 +33,9 @@ const DEFAULT_WRITE_ASSISTANT_MODEL = 'auto'
 
 export function readStoredPreviewMode(): WritePreviewMode {
   const raw = readBrowserStorageItem(WRITE_PREVIEW_MODE_KEY)
-  return raw === 'source' || raw === 'live' || raw === 'split' || raw === 'preview' ? raw : 'live'
+  return raw === 'rich' || raw === 'source' || raw === 'live' || raw === 'split' || raw === 'preview'
+    ? raw
+    : 'rich'
 }
 
 export function readStoredAssistantOpen(): boolean {

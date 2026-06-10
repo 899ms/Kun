@@ -8,6 +8,7 @@ import { saveActiveSddDraftToDisk, syncActiveSddDraftFromDisk } from '../../sdd/
 import { useWriteWorkspaceStore } from '../../write/write-workspace-store'
 import { startWriteWorkspaceFileWatch } from '../../write/write-file-watch'
 import { WriteMarkdownEditor } from '../write/WriteMarkdownEditor'
+import { WriteRichEditor } from '../../write/tiptap/WriteRichEditor'
 import { SidebarTitlebarToggleButton } from '../sidebar/SidebarPrimitives'
 
 const SDD_AUTOSAVE_MS = 650
@@ -275,13 +276,11 @@ export function SddDraftEditorView({
           }`}
         >
           {upgrading ? <div className="sdd-editor-progress" /> : null}
-          <WriteMarkdownEditor
+          <WriteRichEditor
             value={content}
             workspaceRoot={activeDraft.workspaceRoot}
             filePath={activeDraft.absolutePath ?? activeDraft.relativePath}
             imageDirectory={SDD_IMAGE_RELATIVE_DIR}
-            appearance="live"
-            livePreviewEnabled
             readOnly={readOnly}
             completionModel={inlineCompletion.model}
             completionEnabled={inlineCompletion.enabled && inlineCompletionApiReady}
@@ -302,6 +301,36 @@ export function SddDraftEditorView({
               setOperationStatus('idle')
             }}
             onImagePasteError={(message) => setOperationStatus('error', message)}
+            fallback={
+              <WriteMarkdownEditor
+                value={content}
+                workspaceRoot={activeDraft.workspaceRoot}
+                filePath={activeDraft.absolutePath ?? activeDraft.relativePath}
+                imageDirectory={SDD_IMAGE_RELATIVE_DIR}
+                appearance="live"
+                livePreviewEnabled
+                readOnly={readOnly}
+                completionModel={inlineCompletion.model}
+                completionEnabled={inlineCompletion.enabled && inlineCompletionApiReady}
+                completionDebounceMs={inlineCompletion.debounceMs}
+                completionMinAcceptScore={inlineCompletion.minAcceptScore}
+                completionLongEnabled={inlineCompletion.longCompletionEnabled}
+                completionLongDebounceMs={inlineCompletion.longDebounceMs}
+                completionLongMinAcceptScore={inlineCompletion.longMinAcceptScore}
+                recentEdits={recentEdits}
+                onChange={setContent}
+                onDocumentEdit={recordRecentEdits}
+                onSelectionChange={setSelection}
+                onSaveShortcut={() => {
+                  if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current)
+                  void saveActiveSddDraftToDisk()
+                }}
+                onImagePasteSaved={() => {
+                  setOperationStatus('idle')
+                }}
+                onImagePasteError={(message) => setOperationStatus('error', message)}
+              />
+            }
           />
         </div>
       </div>

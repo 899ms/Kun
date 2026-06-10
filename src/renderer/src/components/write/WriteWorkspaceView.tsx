@@ -3,7 +3,8 @@ import { useShallow } from 'zustand/react/shallow'
 import {
   Columns2,
   Eye,
-  FileCode2
+  FileCode2,
+  Type
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { WriteExportFormat } from '@shared/write-export'
@@ -25,6 +26,7 @@ import {
 } from '../../write/inline-edit'
 import { createWriteRecentEdit } from '../../write/recent-edits'
 import { startWriteWorkspaceFileWatch } from '../../write/write-file-watch'
+import type { WriteRichEditorHandle } from '../../write/tiptap/WriteRichEditor'
 import { useWriteSplitScrollSync } from './use-write-split-scroll-sync'
 import { WriteWorkspaceEmptyState } from './WriteWorkspaceEmptyState'
 import { WriteWorkspaceToolbar } from './WriteWorkspaceToolbar'
@@ -139,6 +141,7 @@ export function WriteWorkspaceView({
   const previewPaneRef = useRef<HTMLDivElement | null>(null)
   const exportNoticeTimerRef = useRef<number | null>(null)
   const inlineAgentTextareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const richHandleRef = useRef<WriteRichEditorHandle | null>(null)
   const [inlineAgentValue, setInlineAgentValue] = useState('')
   const [inlineAgentOpen, setInlineAgentOpen] = useState(false)
   const [inlineEditInFlight, setInlineEditInFlight] = useState(false)
@@ -235,7 +238,14 @@ export function WriteWorkspaceView({
       return
     }
 
-    const draft = buildWriteInlineEditDraft(fileContent, selection.ranges[0], trimmed, {
+    // In rich mode the inline edit operates on the markdown projection: the
+    // selection ranges are projection offsets and the replacement is applied
+    // through the editor so undo history and node structure stay intact.
+    const richHandle = richModeActive ? richHandleRef.current : null
+    const richProjectionText = richHandle?.getProjectionText() ?? null
+    const editContent = richProjectionText ?? fileContent
+
+    const draft = buildWriteInlineEditDraft(editContent, selection.ranges[0], trimmed, {
       workspaceRoot,
       currentFilePath: activeFilePath,
       model: inlineCompletion.model,
@@ -255,6 +265,25 @@ export function WriteWorkspaceView({
       const replacement = result.action?.kind === 'edit'
         ? result.action.replacement
         : result.completion
+
+      if (richHandle) {
+        const applied = richHandle.applyProjectedReplacement(
+          { from: draft.scope.from, to: draft.scope.to },
+          draft.scope.text,
+          replacement,
+          trimmed
+        )
+        if (!applied) {
+          setFileError(t('writeInlineEditChanged'))
+          return
+        }
+        setSelection({ text: '', ranges: [], charCount: 0 })
+        setInlineAgentValue('')
+        setInlineAgentOpen(false)
+        setFileError(null)
+        showExportNotice({ tone: 'success', message: t('writeInlineEditApplied') })
+        return
+      }
 
       const latest = useWriteWorkspaceStore.getState()
       if (
@@ -552,11 +581,23 @@ export function WriteWorkspaceView({
   const previewWidth = previewMode === 'split'
     ? 'min-w-0 flex-1 basis-1/2'
     : 'min-w-0 flex-1'
+  const richModeActive =
+    previewMode === 'rich' && isMarkdown && renderSafety.livePreviewEnabled && activeFileIsText
   const liveModeActive = previewMode === 'live' && renderSafety.livePreviewEnabled
-  const sourceModeActive = previewMode === 'source' || (previewMode === 'live' && !renderSafety.livePreviewEnabled)
+  const sourceModeActive =
+    previewMode === 'source' ||
+    ((previewMode === 'live' || previewMode === 'rich') && !renderSafety.livePreviewEnabled) ||
+    (previewMode === 'rich' && !richModeActive)
   const editorAppearance = sourceModeActive ? 'source' : 'live'
 
   const modeMenuItems: Array<{ mode: WritePreviewMode; label: string; shortLabel: string; icon: ReactElement; active: boolean }> = [
+    {
+      mode: 'rich',
+      label: t('writeModeRich'),
+      shortLabel: t('writeModeRich'),
+      icon: <Type className="h-4 w-4" strokeWidth={1.85} />,
+      active: richModeActive
+    },
     {
       mode: 'source',
       label: t('writeModeSource'),
@@ -636,6 +677,8 @@ export function WriteWorkspaceView({
             editorWidth={editorWidth}
             previewWidth={previewWidth}
             editorAppearance={editorAppearance}
+            richModeActive={richModeActive}
+            richHandleRef={richHandleRef}
             debouncedPreviewContent={debouncedPreviewContent}
             isMarkdown={isMarkdown}
             inlineCompletion={inlineCompletion}

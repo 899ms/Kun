@@ -4,7 +4,7 @@ import type { WriteEditorSelectionState } from '../components/write/WriteMarkdow
 import type { WriteQuotedSelection } from './quoted-selection'
 import type { WriteRecentEdit } from './recent-edits'
 
-export type WritePreviewMode = 'source' | 'live' | 'split' | 'preview'
+export type WritePreviewMode = 'rich' | 'source' | 'live' | 'split' | 'preview'
 export type WriteSaveStatus = 'saved' | 'dirty' | 'saving' | 'error'
 export type WriteActiveFileKind = 'text' | 'image'
 

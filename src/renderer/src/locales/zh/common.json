@@ -809,12 +809,12 @@
   "sandboxFullAccessShort": "完全访问",
   "sandboxExternalShort": "外部沙箱",
   "runtimeChecking": "正在检查运行时…",
-	  "runtimeStreamRecovering": "正在恢复运行时事件流…",
-	  "toolUploadWaitStatus": "已收到 {{count}} 个工具结果，正在等待模型继续…",
-	  "toolCatalogChangedStatus": "工具目录已变化；Kun 已刷新当前工具列表。",
-	  "toolStormSuppressedStatus": "{{tool}} 连续重复相同调用，Kun 已压制重复请求并提示模型换个思路。",
-	  "compactionSummaryFallbackStatus": "模型压缩摘要暂不可用；Kun 已改用启发式摘要。",
-	  "runtimeReady": "已连接运行时",
+  "runtimeStreamRecovering": "正在恢复运行时事件流…",
+  "toolUploadWaitStatus": "已收到 {{count}} 个工具结果，正在等待模型继续…",
+  "toolCatalogChangedStatus": "工具目录已变化；Kun 已刷新当前工具列表。",
+  "toolStormSuppressedStatus": "{{tool}} 连续重复相同调用，Kun 已压制重复请求并提示模型换个思路。",
+  "compactionSummaryFallbackStatus": "模型压缩摘要暂不可用；Kun 已改用启发式摘要。",
+  "runtimeReady": "已连接运行时",
   "runtimeReadyShort": "已连接",
   "runtimeCheckingShort": "连接中",
   "runtimeOfflineShort": "运行时离线",
@@ -1256,5 +1256,7 @@
   "toolBuiltinBash": "命令",
   "sidebarFooterHint": "连接本地运行后即可创建会话并与代理对话。",
   "appErrorTitle": "应用出了点问题",
-  "appErrorReload": "重新加载"
+  "appErrorReload": "重新加载",
+  "writeRichFallbackNotice": "此文档包含富文本模式无法无损保留的语法，已切换到源码编辑以保护文件内容。",
+  "writeModeRich": "富文本"
 }

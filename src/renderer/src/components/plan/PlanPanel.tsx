@@ -10,6 +10,7 @@ import {
 import { useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
 import { WriteMarkdownEditor } from '../write/WriteMarkdownEditor'
+import { WriteRichEditor } from '../../write/tiptap/WriteRichEditor'
 import { useWriteWorkspaceStore } from '../../write/write-workspace-store'
 import { useChatStore } from '../../store/chat-store'
 import {
@@ -265,12 +266,10 @@ export function PlanPanel({
         ) : (
           <div className="flex h-full min-h-0 min-w-0">
             <div className="min-h-0 min-w-0 flex-1 bg-white dark:bg-ds-canvas">
-              <WriteMarkdownEditor
+              <WriteRichEditor
                 value={content}
                 workspaceRoot={activePlan!.workspaceRoot}
                 filePath={activePlan!.absolutePath ?? activePlan!.relativePath}
-                appearance="live"
-                livePreviewEnabled
                 readOnly={readOnly}
                 completionModel={inlineCompletion.model}
                 completionEnabled={inlineCompletion.enabled && inlineCompletionApiReady}
@@ -293,6 +292,37 @@ export function PlanPanel({
                   setOperationStatus('idle')
                 }}
                 onImagePasteError={(message) => setOperationStatus('error', message)}
+                fallback={
+                  <WriteMarkdownEditor
+                    value={content}
+                    workspaceRoot={activePlan!.workspaceRoot}
+                    filePath={activePlan!.absolutePath ?? activePlan!.relativePath}
+                    appearance="live"
+                    livePreviewEnabled
+                    readOnly={readOnly}
+                    completionModel={inlineCompletion.model}
+                    completionEnabled={inlineCompletion.enabled && inlineCompletionApiReady}
+                    completionDebounceMs={inlineCompletion.debounceMs}
+                    completionMinAcceptScore={inlineCompletion.minAcceptScore}
+                    completionLongEnabled={inlineCompletion.longCompletionEnabled}
+                    completionLongDebounceMs={inlineCompletion.longDebounceMs}
+                    completionLongMinAcceptScore={inlineCompletion.longMinAcceptScore}
+                    recentEdits={recentEdits}
+                    onChange={setContent}
+                    onDocumentEdit={recordRecentEdits}
+                    onSelectionChange={setSelection}
+                    onSaveShortcut={() => {
+                      const snapshot = useGuiPlanStore.getState()
+                      if (snapshot.activePlan?.id === activePlan!.id && snapshot.saveStatus === 'dirty') {
+                        setSaveStatus('dirty')
+                      }
+                    }}
+                    onImagePasteSaved={() => {
+                      setOperationStatus('idle')
+                    }}
+                    onImagePasteError={(message) => setOperationStatus('error', message)}
+                  />
+                }
               />
             </div>
           </div>

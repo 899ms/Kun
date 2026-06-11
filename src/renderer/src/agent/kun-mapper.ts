@@ -52,6 +52,8 @@ export function threadFromCore(thread: CoreThreadSummaryJson): NormalizedThread 
     mode: thread.mode,
     workspace: thread.workspace,
     status: thread.status,
+    approvalPolicy: normalizeApprovalPolicy(thread.approvalPolicy),
+    sandboxMode: normalizeSandboxMode(thread.sandboxMode),
     archived: thread.status === 'archived',
     relation: thread.relation,
     parentThreadId: thread.parentThreadId,
@@ -62,6 +64,31 @@ export function threadFromCore(thread: CoreThreadSummaryJson): NormalizedThread 
     forkedFromTurnCount: thread.forkedFromTurnCount,
     goal: thread.goal ? goalFromCore(thread.goal) : null,
     todos: thread.todos ? todosFromCore(thread.todos) : null
+  }
+}
+
+function normalizeApprovalPolicy(value: string | undefined): NormalizedThread['approvalPolicy'] {
+  switch (value) {
+    case 'auto':
+    case 'on-request':
+    case 'untrusted':
+    case 'suggest':
+    case 'never':
+      return value
+    default:
+      return undefined
+  }
+}
+
+function normalizeSandboxMode(value: string | undefined): NormalizedThread['sandboxMode'] {
+  switch (value) {
+    case 'read-only':
+    case 'workspace-write':
+    case 'danger-full-access':
+    case 'external-sandbox':
+      return value
+    default:
+      return undefined
   }
 }
 
@@ -1103,7 +1130,7 @@ export async function dispatchKunRuntimeEvent(
     case 'turn_failed': {
       const payload = runtimeErrorFromEvent(event, 'Kun turn failed')
       sink.onRuntimeError?.(payload)
-      sink.onError(errorForRuntimeEvent(payload))
+      sink.onError(errorForRuntimeEvent(payload), { terminal: true })
       return
     }
     case 'error':

@@ -20,6 +20,8 @@ export type CoreThreadSummaryJson = {
   model: string
   mode: string
   status: CoreThreadStatus
+  approvalPolicy?: string
+  sandboxMode?: string
   relation?: 'primary' | 'fork' | 'side'
   parentThreadId?: string
   forkedFromThreadId?: string
@@ -487,6 +489,8 @@ export type CoreRuntimeEventJson = {
   itemId?: string
   item?: CoreTurnItemJson
   approvalId?: string
+  approvalPolicy?: string
+  sandboxMode?: string
   toolName?: string
   callId?: string
   readyCount?: number

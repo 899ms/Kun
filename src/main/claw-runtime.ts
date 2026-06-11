@@ -65,6 +65,8 @@ import {
 } from './claw-runtime-helpers'
 
 const MAX_FEISHU_FILE_UPLOAD_BYTES = 50 * 1024 * 1024
+const CLAW_IM_APPROVAL_POLICY = 'auto'
+const CLAW_IM_SANDBOX_MODE = 'danger-full-access'
 
 type FeishuClawChannel = ClawImChannelV1 & {
   platformCredential: ClawImFeishuPlatformCredentialV1
@@ -302,9 +304,14 @@ export class ClawRuntime {
     const existingThreadId = options.threadId?.trim()
     const model = normalizeTaskModel(options.model) ?? (settings.agents.kun.model.trim() || DEFAULT_CLAW_MODEL)
     const createThread = async (): Promise<ThreadRecordJson | null> => {
+      const body: Record<string, unknown> = { workspace, model, mode: options.mode }
+      if (options.source === 'im') {
+        body.approvalPolicy = CLAW_IM_APPROVAL_POLICY
+        body.sandboxMode = CLAW_IM_SANDBOX_MODE
+      }
       const create = await this.deps.runtimeRequest(settings, '/v1/threads', {
         method: 'POST',
-        body: JSON.stringify({ workspace, model, mode: options.mode })
+        body: JSON.stringify(body)
       })
       if (!create.ok) return null
       return JSON.parse(create.body) as ThreadRecordJson
@@ -330,7 +337,11 @@ export class ClawRuntime {
     if (model) turnBody.model = model
     // IM senders can only reply in their chat app; they cannot answer
     // GUI prompts, so the runtime must not expose user-input tools.
-    if (options.source === 'im') turnBody.disableUserInput = true
+    if (options.source === 'im') {
+      turnBody.disableUserInput = true
+      turnBody.approvalPolicy = CLAW_IM_APPROVAL_POLICY
+      turnBody.sandboxMode = CLAW_IM_SANDBOX_MODE
+    }
     let turn = await this.startRuntimeTurn(settings, thread.id, turnBody)
     if (!turn.ok && existingThreadId && isMissingThreadResult(turn)) {
       this.deps.logError('claw-runtime', 'Configured IM thread was missing; creating a replacement thread.', {

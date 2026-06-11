@@ -395,6 +395,21 @@ describe('ClawRuntime', () => {
     })
 
     expect(result).toMatchObject({ ok: true, text: 'hello from claw' })
+    const createThreadCall = runtimeRequest.mock.calls.find(
+      ([, path, init]) => path === '/v1/threads' && init?.method === 'POST'
+    )
+    expect(JSON.parse(String(createThreadCall?.[2]?.body ?? '{}'))).toMatchObject({
+      approvalPolicy: 'auto',
+      sandboxMode: 'danger-full-access'
+    })
+    const turnCall = runtimeRequest.mock.calls.find(
+      ([, path, init]) => path === '/v1/threads/thr_1/turns' && init?.method === 'POST'
+    )
+    expect(JSON.parse(String(turnCall?.[2]?.body ?? '{}'))).toMatchObject({
+      disableUserInput: true,
+      approvalPolicy: 'auto',
+      sandboxMode: 'danger-full-access'
+    })
   })
 
   it('reads assistant text from the Kun thread detail shape used by the real runtime', async () => {
@@ -862,7 +877,9 @@ describe('ClawRuntime', () => {
     )
     expect(turnCall).toBeDefined()
     expect(JSON.parse(String(turnCall?.[2]?.body ?? '{}'))).toMatchObject({
-      disableUserInput: true
+      disableUserInput: true,
+      approvalPolicy: 'auto',
+      sandboxMode: 'danger-full-access'
     })
   })
 

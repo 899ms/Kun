@@ -62,10 +62,14 @@ describe('domain.thread', () => {
       id: 'thr_1',
       title: 'demo',
       workspace: '/tmp',
-      model: 'deepseek-chat'
+      model: 'deepseek-chat',
+      approvalPolicy: 'on-request',
+      sandboxMode: 'read-only'
     })
     const summary = toThreadSummary(thread)
     expect(summary).not.toHaveProperty('turns')
+    expect(summary.approvalPolicy).toBe('on-request')
+    expect(summary.sandboxMode).toBe('read-only')
   })
 })
 

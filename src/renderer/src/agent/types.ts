@@ -7,6 +7,7 @@ import type {
   CoreRuntimeSkillJson,
   CoreRuntimeToolDiagnosticsJson
 } from './kun-contract'
+import type { ApprovalPolicy, SandboxMode } from '@shared/app-settings'
 
 export type ToolItemKind = 'tool_call' | 'command_execution' | 'file_change'
 export type RuntimeErrorSeverity = 'info' | 'warning' | 'error'
@@ -73,6 +74,8 @@ export type NormalizedThread = {
   mode: string
   workspace?: string
   status?: string
+  approvalPolicy?: ApprovalPolicy
+  sandboxMode?: SandboxMode
   archived?: boolean
   preview?: string
   latestTurnId?: string
@@ -342,6 +345,10 @@ export type ThreadDeltaEvent = {
   seq?: number
 }
 
+export type ThreadErrorOptions = {
+  terminal?: boolean
+}
+
 /** Cumulative usage/cost for a Kun thread. */
 export type ThreadUsageSnapshot = {
   inputTokens: number
@@ -376,7 +383,7 @@ export type ThreadEventSink = {
   onGoal(ev: { threadId: string; goal: ThreadGoal | null; cleared?: boolean; createdAt?: string }): void
   onTodos?(ev: { threadId: string; todos: ThreadTodoList | null; cleared?: boolean; createdAt?: string }): void
   onTurnComplete(): void
-  onError(err: Error): void
+  onError(err: Error, options?: ThreadErrorOptions): void
   /** Optional: cumulative usage update for the thread. */
   onUsage?(usage: ThreadUsageSnapshot): void
 }

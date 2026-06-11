@@ -1223,6 +1223,8 @@ export class AgentLoop {
           approvalId: approval.id,
           toolName: approval.toolName,
           status: 'pending',
+          approvalPolicy: input.approvalPolicy,
+          sandboxMode: input.sandboxMode,
           summary: approval.summary
         })
         return this.opts.approvalGate.request(approval)

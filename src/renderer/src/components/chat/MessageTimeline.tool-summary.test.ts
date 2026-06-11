@@ -385,6 +385,39 @@ describe('MessageTimeline Kun runtime metadata smoke', () => {
     expect(html).not.toContain('read detail should stay tucked away')
   })
 
+  it('auto-expands pending approvals while keeping other tool details tucked away', () => {
+    const readBlock: ChatBlock = toolBlock({
+      id: 'tool_read',
+      summary: 'read: file',
+      detail: 'read detail should stay tucked away',
+      meta: { toolName: 'read' },
+      filePath: '/tmp/readme.md'
+    })
+    const approvalBlock: ChatBlock = {
+      kind: 'approval',
+      id: 'approval_appr_1',
+      approvalId: 'appr_1',
+      status: 'pending',
+      toolName: 'edit',
+      summary: 'Run edit(path="/tmp/app.ts")'
+    }
+
+    const html = renderToStaticMarkup(
+      createElement(ProcessSectionRow, {
+        section: { id: 'execution-batch', kind: 'execution', blocks: [readBlock, approvalBlock] },
+        processing: true,
+        singleReasoningSection: false,
+        viewportRef: { current: null }
+      })
+    )
+
+    expect(html).toContain('ds-work-stack')
+    expect(html).toContain('Run edit(path=&quot;/tmp/app.ts&quot;)')
+    expect(html).toMatch(/Approval required|需要审批|approvalTitle/)
+    expect(html).toMatch(/Allow|允许|approvalAllow/)
+    expect(html).not.toContain('read detail should stay tucked away')
+  })
+
   it('renders request_user_input without options as a freeform answer field', () => {
     const inputBlock: ChatBlock = {
       kind: 'user_input',

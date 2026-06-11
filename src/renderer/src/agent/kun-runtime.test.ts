@@ -735,6 +735,65 @@ describe('KunRuntimeProvider', () => {
     expect(sink.onApproval).not.toHaveBeenCalled()
   })
 
+  it('uses the approval policy from runtime events before falling back to settings', async () => {
+    let onData: ((payload: { streamId: string; events: unknown[] }) => void) | null = null
+    const runtimeRequest = vi.fn(async () => ({ ok: true, status: 200, body: '{}' }))
+    const getSettings = vi.fn(async (): Promise<AppSettingsV1> => ({
+      ...settings(),
+      agents: { kun: { ...defaultKunRuntimeSettings(), approvalPolicy: 'on-request' } }
+    }))
+    const ac = new AbortController()
+    const sink: ThreadEventSink = {
+      onSeq: vi.fn(),
+      onDeltas: vi.fn(),
+      onUserMessage: vi.fn(),
+      onTool: vi.fn(),
+      onCompaction: vi.fn(),
+      onApproval: vi.fn(),
+      onUserInput: vi.fn(),
+      onUserInputStatus: vi.fn(),
+      onGoal: vi.fn(),
+      onTodos: vi.fn(),
+      onTurnComplete: vi.fn(() => ac.abort()),
+      onError: vi.fn()
+    }
+    installDsGui({
+      getSettings,
+      runtimeRequest,
+      onSseEvent: vi.fn((handler) => {
+        onData = handler
+        return () => undefined
+      }),
+      startSse: vi.fn(async (_threadId, _sinceSeq, streamId) => {
+        queueMicrotask(() => {
+          onData?.({
+            streamId: streamId ?? 'stream-1',
+            events: [
+              {
+                kind: 'approval_requested',
+                seq: 4,
+                approvalId: 'appr_event_auto',
+                approvalPolicy: 'auto',
+                summary: 'Need approval'
+              },
+              { kind: 'turn_completed', seq: 5 }
+            ]
+          })
+        })
+        return { streamId: streamId ?? 'stream-1' }
+      })
+    })
+    const provider = new KunRuntimeProvider()
+    await provider.subscribeThreadEvents('thr_1', 0, sink, ac.signal)
+    expect(runtimeRequest).toHaveBeenCalledWith(
+      '/v1/approvals/appr_event_auto',
+      'POST',
+      JSON.stringify({ decision: 'allow' })
+    )
+    expect(getSettings).not.toHaveBeenCalled()
+    expect(sink.onApproval).not.toHaveBeenCalled()
+  })
+
   it('renders approval cards for suggest and untrusted policies', async () => {
     for (const policy of ['suggest', 'untrusted'] as const) {
       let onData: ((payload: { streamId: string; events: unknown[] }) => void) | null = null

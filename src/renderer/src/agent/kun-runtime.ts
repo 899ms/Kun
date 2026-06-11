@@ -79,6 +79,19 @@ function readRuntimeError(body: string, fallback: string): RuntimeError {
   return parseRuntimeErrorBody(body, fallback)
 }
 
+function normalizeApprovalPolicy(value: string | undefined): NormalizedThread['approvalPolicy'] {
+  switch (value) {
+    case 'auto':
+    case 'on-request':
+    case 'untrusted':
+    case 'suggest':
+    case 'never':
+      return value
+    default:
+      return undefined
+  }
+}
+
 function readRuntimeJson<T>(body: string, fallback: string): T {
   try {
     return JSON.parse(body) as T
@@ -808,8 +821,8 @@ export class KunRuntimeProvider implements AgentProvider {
     const approvalId = event.approvalId ?? event.itemId ?? ''
     if (!approvalId) return
     try {
-      const settings = await rendererRuntimeClient.getSettings()
-      const policy = getKunRuntimeSettings(settings).approvalPolicy
+      const eventPolicy = normalizeApprovalPolicy(event.approvalPolicy)
+      const policy = eventPolicy ?? getKunRuntimeSettings(await rendererRuntimeClient.getSettings()).approvalPolicy
       switch (policy) {
         case 'auto':
           await this.submitApprovalDecision(approvalId, 'allow')
